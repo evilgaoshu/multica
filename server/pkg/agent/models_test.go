@@ -131,11 +131,63 @@ func TestListModelsKiroWithoutBinary(t *testing.T) {
 	}
 }
 
+func TestListModelsDroidWithoutBinary(t *testing.T) {
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "droid")
+	modelCacheMu.Unlock()
+
+	got, err := ListModels(ctx, "droid", "/nonexistent/droid")
+	if err != nil {
+		t.Fatalf("ListModels(droid) error: %v", err)
+	}
+	if got == nil {
+		t.Error("expected non-nil slice even when binary is missing")
+	}
+}
+
 func TestListModelsUnknownProvider(t *testing.T) {
 	ctx := context.Background()
 	_, err := ListModels(ctx, "nonexistent", "")
 	if err == nil {
 		t.Fatal("ListModels(unknown) expected error")
+	}
+}
+
+func TestParseDroidExecHelpModels(t *testing.T) {
+	input := `Options:
+  -m, --model <id>            Model ID to use (default: claude-opus-4-7)
+
+Available Models:
+  claude-opus-4-7              Claude Opus 4.7 (default)
+  gpt-5.5                      GPT-5.5
+  gemini-3.1-pro-preview       Gemini 3.1 Pro
+  custom:DeepSeek-V4-Pro-0     DeepSeek V4 Pro
+
+Model details:
+  - Claude Opus 4.7: supports reasoning: Yes
+`
+	models := parseDroidExecHelpModels(input)
+	if len(models) != 4 {
+		t.Fatalf("expected 4 droid models, got %d: %+v", len(models), models)
+	}
+	checks := []struct {
+		index    int
+		id       string
+		label    string
+		provider string
+		def      bool
+	}{
+		{0, "claude-opus-4-7", "Claude Opus 4.7", "anthropic", true},
+		{1, "gpt-5.5", "GPT-5.5", "openai", false},
+		{2, "gemini-3.1-pro-preview", "Gemini 3.1 Pro", "google", false},
+		{3, "custom:DeepSeek-V4-Pro-0", "DeepSeek V4 Pro", "custom", false},
+	}
+	for _, check := range checks {
+		got := models[check.index]
+		if got.ID != check.id || got.Label != check.label || got.Provider != check.provider || got.Default != check.def {
+			t.Errorf("models[%d] = %+v, want id=%q label=%q provider=%q default=%v", check.index, got, check.id, check.label, check.provider, check.def)
+		}
 	}
 }
 

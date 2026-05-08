@@ -38,6 +38,17 @@ func TestNewReturnsCopilotBackend(t *testing.T) {
 	}
 }
 
+func TestNewReturnsDroidBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("droid", Config{ExecutablePath: "/nonexistent/droid"})
+	if err != nil {
+		t.Fatalf("New(droid) error: %v", err)
+	}
+	if _, ok := b.(*droidBackend); !ok {
+		t.Fatalf("expected *droidBackend, got %T", b)
+	}
+}
+
 func TestNewRejectsUnknownType(t *testing.T) {
 	t.Parallel()
 	_, err := New("gpt", Config{})
@@ -71,7 +82,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// runtime the daemon actually spawns. If a new backend is added, add an
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
-		"claude", "codex", "copilot", "cursor", "gemini",
+		"claude", "codex", "copilot", "cursor", "droid", "gemini",
 		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
 	}
 	for _, t_ := range supported {

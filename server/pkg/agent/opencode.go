@@ -159,6 +159,7 @@ type eventResult struct {
 	errMsg    string
 	output    string
 	sessionID string
+	model     string
 	usage     TokenUsage // accumulated token usage across all steps
 }
 
