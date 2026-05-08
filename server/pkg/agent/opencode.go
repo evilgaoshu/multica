@@ -17,7 +17,9 @@ import (
 // opencodeBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args.
 var opencodeBlockedArgs = map[string]blockedArgMode{
-	"--format": blockedWithValue, // json output format for daemon communication
+	"--format":                          blockedWithValue,  // json output format for daemon communication
+	"--dangerously-skip-permissions":    blockedStandalone, // non-interactive daemon approval mode
+	"--no-dangerously-skip-permissions": blockedStandalone,
 }
 
 // opencodeBackend implements Backend by spawning `opencode run --format json`
@@ -49,7 +51,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	args := []string{"run", "--format", "json"}
+	args := []string{"run", "--format", "json", "--dangerously-skip-permissions"}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}

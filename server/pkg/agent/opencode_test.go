@@ -1,14 +1,17 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewReturnsOpencodeBackend(t *testing.T) {
@@ -711,6 +714,69 @@ func TestOpencodeProcessEventsErrorDoesNotRevertToCompleted(t *testing.T) {
 	}
 
 	close(ch)
+}
+
+func TestOpencodeBackendInvokesRunWithSkipPermissions(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	tempDir := t.TempDir()
+	argsFile := filepath.Join(tempDir, "argv.txt")
+	fakePath := filepath.Join(tempDir, "opencode")
+	script := "#!/bin/sh\n" +
+		": > \"$OPENCODE_ARGS_FILE\"\n" +
+		"for arg in \"$@\"; do\n" +
+		"  printf '%s\\n' \"$arg\" >> \"$OPENCODE_ARGS_FILE\"\n" +
+		"done\n" +
+		"printf '%s\\n' '{\"type\":\"text\",\"sessionID\":\"ses_args\",\"part\":{\"type\":\"text\",\"text\":\"done\"}}'\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"OPENCODE_ARGS_FILE": argsFile},
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{
+		Timeout:    5 * time.Second,
+		CustomArgs: []string{"--no-dangerously-skip-permissions"},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	found := false
+	for _, arg := range args {
+		if arg == "--dangerously-skip-permissions" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected opencode argv to include --dangerously-skip-permissions, got %v", args)
+	}
+	for _, arg := range args {
+		if arg == "--no-dangerously-skip-permissions" {
+			t.Fatalf("custom args must not disable daemon permissions, got %v", args)
+		}
+	}
 }
 
 // ── Windows native-binary resolution tests ──
