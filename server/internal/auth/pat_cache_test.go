@@ -22,6 +22,9 @@ func newRedisTestClient(t *testing.T) *redis.Client {
 	if err != nil {
 		t.Fatalf("parse REDIS_TEST_URL: %v", err)
 	}
+	// Keep package Redis tests isolated from other packages that also call
+	// FlushDB while `go test ./...` runs packages concurrently.
+	opts.DB = 11
 	rdb := redis.NewClient(opts)
 	ctx := context.Background()
 	if err := rdb.Ping(ctx).Err(); err != nil {
@@ -45,7 +48,7 @@ func TestPATCache_NilSafe(t *testing.T) {
 		t.Fatalf("nil cache must miss; got (%q, %v)", v, ok)
 	}
 	c.Set(ctx, "any-hash", "user-1", AuthCacheTTL) // no panic
-	c.Invalidate(ctx, "any-hash")                 // no panic
+	c.Invalidate(ctx, "any-hash")                  // no panic
 }
 
 func TestNewPATCache_NilRedisReturnsNil(t *testing.T) {
