@@ -65,6 +65,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCursorModels(ctx, executablePath)
 		})
+	case "droid":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverDroidModels(ctx, executablePath)
+		})
 	case "copilot":
 		return copilotStaticModels(), nil
 	case "hermes":
@@ -333,6 +337,133 @@ func parsePiModels(output string) []Model {
 		models = append(models, Model{ID: id, Label: id, Provider: provider})
 	}
 	return models
+}
+
+// discoverDroidModels parses `droid exec --help`, which lists both built-in
+// and locally configured custom models without requiring an API request.
+func discoverDroidModels(ctx context.Context, executablePath string) ([]Model, error) {
+	if executablePath == "" {
+		executablePath = "droid"
+	}
+	if _, err := exec.LookPath(executablePath); err != nil {
+		return []Model{}, nil
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, executablePath, "exec", "--help")
+	hideAgentWindow(cmd)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	stdout, err := cmd.Output()
+	if err != nil {
+		return []Model{}, nil
+	}
+	text := string(stdout)
+	if strings.TrimSpace(text) == "" {
+		text = stderr.String()
+	}
+	return parseDroidExecHelpModels(text), nil
+}
+
+func parseDroidExecHelpModels(output string) []Model {
+	defaultID := parseDroidDefaultModel(output)
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var models []Model
+	seen := map[string]bool{}
+	inModels := false
+	for scanner.Scan() {
+		line := strings.TrimRight(scanner.Text(), " \t")
+		trimmed := strings.TrimSpace(line)
+		switch trimmed {
+		case "Available Models:", "Custom Models:":
+			inModels = true
+			continue
+		case "Model details:", "Authentication:", "Examples:":
+			inModels = false
+			continue
+		}
+		if !inModels || trimmed == "" {
+			continue
+		}
+		fields := strings.Fields(trimmed)
+		if len(fields) < 2 {
+			continue
+		}
+		id := fields[0]
+		if !isDroidModelID(id) || seen[id] {
+			continue
+		}
+		seen[id] = true
+		label := strings.TrimSpace(strings.TrimPrefix(trimmed, id))
+		isDefault := id == defaultID || strings.Contains(label, "(default)")
+		label = strings.TrimSpace(strings.ReplaceAll(label, "(default)", ""))
+		if label == "" {
+			label = id
+		}
+		models = append(models, Model{
+			ID:       id,
+			Label:    label,
+			Provider: droidModelProvider(id),
+			Default:  isDefault,
+		})
+	}
+	return models
+}
+
+func parseDroidDefaultModel(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		if !strings.Contains(line, "--model") || !strings.Contains(line, "default:") {
+			continue
+		}
+		_, after, ok := strings.Cut(line, "default:")
+		if !ok {
+			continue
+		}
+		after = strings.TrimSpace(after)
+		if i := strings.Index(after, ")"); i >= 0 {
+			after = after[:i]
+		}
+		return strings.TrimSpace(after)
+	}
+	return ""
+}
+
+func isDroidModelID(s string) bool {
+	if s == "" || strings.HasSuffix(s, ":") {
+		return false
+	}
+	first := s[0]
+	if !((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z')) {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.' || r == '/' || r == ':':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func droidModelProvider(id string) string {
+	switch {
+	case strings.HasPrefix(id, "claude-"):
+		return "anthropic"
+	case strings.HasPrefix(id, "gpt-") || strings.HasPrefix(id, "o"):
+		return "openai"
+	case strings.HasPrefix(id, "gemini-"):
+		return "google"
+	case strings.HasPrefix(id, "custom:"):
+		return "custom"
+	default:
+		return "factory"
+	}
 }
 
 // discoverHermesModels spins up a throwaway `hermes acp` process,

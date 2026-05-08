@@ -26,6 +26,9 @@ func newRedisTestClient(t *testing.T) *redis.Client {
 	if err != nil {
 		t.Fatalf("parse REDIS_TEST_URL: %v", err)
 	}
+	// Keep package Redis tests isolated from other packages that also call
+	// FlushDB while `go test ./...` runs packages concurrently.
+	opts.DB = 12
 	rdb := redis.NewClient(opts)
 	ctx := context.Background()
 	if err := rdb.Ping(ctx).Err(); err != nil {
